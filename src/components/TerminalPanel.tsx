@@ -168,7 +168,10 @@ export function TerminalPanel({ terminalId, isActive = true }: TerminalPanelProp
       convertEol: true,
       allowProposedApi: true,
       allowTransparency: true,
-      scrollOnOutput: true
+      scrollOnOutput: true,
+      // Disable screenReaderMode to prevent vim black screen issue with large files
+      // See: https://github.com/xtermjs/xterm.js/issues/1965
+      screenReaderMode: false
     })
 
     const fitAddon = new FitAddon()
@@ -177,17 +180,31 @@ export function TerminalPanel({ terminalId, isActive = true }: TerminalPanelProp
       // Open URL in default browser
       window.electronAPI.shell.openExternal(uri)
     })
-    terminal.loadAddon(fitAddon)
-    terminal.loadAddon(webLinksAddon)
-    terminal.open(containerRef.current)
 
-    // Load unicode11 addon after terminal is open
+    // Load addons before open for proper initialization
+    terminal.loadAddon(fitAddon)
     terminal.loadAddon(unicode11Addon)
+    terminal.loadAddon(webLinksAddon)
+
+    // Set unicode version before opening terminal
+    // This ensures proper character width calculation for CJK/wide chars
     terminal.unicode.activeVersion = '11'
 
-    // Delay fit to ensure terminal is fully initialized
+    terminal.open(containerRef.current)
+
+    // Fit and sync to PTY immediately after opening
+    // Use multiple frames to ensure layout is complete
     requestAnimationFrame(() => {
       fitAddon.fit()
+      const { cols, rows } = terminal
+      window.electronAPI.pty.resize(terminalId, cols, rows)
+
+      // Force a second resize after a short delay to handle any race conditions
+      setTimeout(() => {
+        fitAddon.fit()
+        const dims = { cols: terminal.cols, rows: terminal.rows }
+        window.electronAPI.pty.resize(terminalId, dims.cols, dims.rows)
+      }, 50)
     })
 
     // Fix IME textarea position - force it to bottom left
